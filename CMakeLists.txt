@@ -7,4 +7,6 @@ project(toys)
 
 set(CMAKE_CXX_STANDARD 23)
 
+add_subdirectory(tests)
 add_subdirectory(variant)
+add_subdirectory(producer_consumer)

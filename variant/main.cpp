@@ -129,7 +129,7 @@ private:
       }...};
 
   std::size_t idx;
-  union_type union_ptr;
+  alignas(std::max({alignof(Types)...})) union_type union_ptr;
 };
 
 template <typename T, typename... Types>
