@@ -78,6 +78,9 @@ public:
 private:
   using union_type = std::array<char, std::max({sizeof(Types)...})>;
 
+  // 这里为什么要定义各种各样的静态函数指针数组？
+  // 因为在运行时，程序无法通过idx获取union_ptr保存的数据的实际类型
+  // 因此需要在编译期间，提前为各种类型定义好函数，然后在运行时通过idx找到对应的函数
   using deconstruct_func = void (*)(union_type &);
   static inline deconstruct_func deconstructors[sizeof...(Types)] = {
       [](union_type &x) {
