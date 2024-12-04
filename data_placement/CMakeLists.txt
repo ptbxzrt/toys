@@ -1,0 +1,1 @@
+add_executable(data_placement main.cpp)
