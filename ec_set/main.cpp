@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "utils.hpp"
+#include "../tools.hpp"
 
 enum class solution_type { copyset, ecset };
 
@@ -194,11 +194,13 @@ private:
 
       num_nodes_permutations_ =
           std::ceil(expected_scatter_width / profit_by_each_ec_set);
-    } else {
+    } else if (TYPE == solution_type::copyset) {
       num_nodes_permutations_ =
           config_.expected_scatter_width / (len_stripe_ - 1);
       num_nodes_permutations_ +=
           (config_.expected_scatter_width % (len_stripe_ - 1) == 0 ? 0 : 1);
+    } else {
+      assert(false);
     }
   }
 

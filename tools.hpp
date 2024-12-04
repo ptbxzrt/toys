@@ -17,8 +17,6 @@ template <typename T> std::pair<double, double> get_avg_and_variance(T &nums) {
   double sum = std::accumulate(nums.begin(), nums.end(), 0.0);
   double avg = sum / static_cast<double>(nums.size());
 
-  // std::cout << std::format("平均值为{}", avg) << std::endl;
-
   double variance = 0;
   for (auto num : nums) {
     variance += std::pow(static_cast<double>(num) - avg, 2);
@@ -27,14 +25,20 @@ template <typename T> std::pair<double, double> get_avg_and_variance(T &nums) {
   return {avg, std::sqrt(variance / static_cast<double>(nums.size()))};
 }
 
-inline double get_combination(int N, int K) {
-  double result = 1;
-  for (int i = 0; i < K; i++) {
-    result *= N;
-    N--;
+inline double get_combination(double N, double K) {
+  if (K > N) {
+    return 0;
   }
-  while (K > 0) {
+  if (K == 0 || K == N) {
+    return 1;
+  }
+
+  double result = 1;
+  int counter = K;
+  for (int i = 0; i < counter; i++) {
+    result *= N;
     result /= K;
+    N--;
     K--;
   }
   return result;
