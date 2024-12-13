@@ -23,9 +23,9 @@ struct placement_config {
   int num_clusters;
 
   // 优秀cluster数量
-  double heterogeneous_factor1 = 0.1;
+  double heterogeneous_factor1 = 0.5;
   // 每个cluster中优秀node数量
-  double heterogeneous_factor2 = 0.2;
+  double heterogeneous_factor2 = 0.5;
 
   double alpha = 0.5;
 };
@@ -39,6 +39,10 @@ struct node_info {
 
   double storage_cost;
   double network_cost;
+
+  int num_data_blocks = 0;
+  int num_local_parity_blocks = 0;
+  int num_global_parity_blocks = 0;
 
   std::unordered_set<int> stripe_ids;
 
@@ -133,34 +137,37 @@ public:
   // 测试load balance
   static void test_case_load_balance() {
     int num_stripes = 1000000;
-    data_placement random({.K = 8,
-                           .L = 4,
-                           .G = 3,
+    int K = 8, L = 4, G = 3;
+    int num_nodes = 200;
+    int num_clusters = 10;
+    data_placement random({.K = K,
+                           .L = L,
+                           .G = G,
                            .num_stripes = num_stripes,
 
-                           .num_nodes = 1000,
-                           .num_clusters = 10});
-    data_placement ecwide({.K = 8,
-                           .L = 4,
-                           .G = 3,
+                           .num_nodes = num_nodes,
+                           .num_clusters = num_clusters});
+    data_placement ecwide({.K = K,
+                           .L = L,
+                           .G = G,
                            .num_stripes = num_stripes,
 
-                           .num_nodes = 1000,
-                           .num_clusters = 10});
-    data_placement icpp23_1({.K = 8,
-                             .L = 4,
-                             .G = 3,
+                           .num_nodes = num_nodes,
+                           .num_clusters = num_clusters});
+    data_placement icpp23_1({.K = K,
+                             .L = L,
+                             .G = G,
                              .num_stripes = num_stripes,
 
-                             .num_nodes = 1000,
-                             .num_clusters = 10});
-    data_placement icpp23_2({.K = 8,
-                             .L = 4,
-                             .G = 3,
+                             .num_nodes = num_nodes,
+                             .num_clusters = num_clusters});
+    data_placement icpp23_2({.K = K,
+                             .L = L,
+                             .G = G,
                              .num_stripes = num_stripes,
 
-                             .num_nodes = 1000,
-                             .num_clusters = 10});
+                             .num_nodes = num_nodes,
+                             .num_clusters = num_clusters});
 
     random.insert_stripes(placement_strategy::random);
     std::cout << std::format("placement_strategy {}\n",
@@ -186,18 +193,28 @@ public:
   // 测试repair load distribution
   static void test_case_repair_load_distribution() {
     int num_stripes = 1000000;
-    int num_nodes = 210;
-    for (int node_id = num_nodes - 1; node_id >= 0; node_id--) {
-      std::cout << std::format("placement_strategy {}\n",
-                               "placement_strategy::ICPP23_2");
-      data_placement ICPP23_2({.K = 24,
-                               .L = 4,
-                               .G = 3,
-                               .num_stripes = num_stripes,
+    int num_nodes = 231;
+    int num_clusters = 11;
 
-                               .num_nodes = num_nodes,
-                               .num_clusters = 10});
-      ICPP23_2.insert_stripes(placement_strategy::ICPP23_2);
+    std::cout << std::format("placement_strategy {}\n",
+                             "placement_strategy::ICPP23_2");
+    data_placement ICPP23_2({.K = 8,
+                             .L = 4,
+                             .G = 3,
+                             .num_stripes = num_stripes,
+
+                             .num_nodes = num_nodes,
+                             .num_clusters = num_clusters});
+    ICPP23_2.insert_stripes(placement_strategy::ICPP23_2);
+    for (auto node_info : ICPP23_2.nodes_info_) {
+      std::cout << std::format("{:4}号节点，数据块数量{:6}，局部校验块数量{:"
+                               "6}，全局校验块数量{}\n",
+                               node_info.node_id, node_info.num_data_blocks,
+                               node_info.num_local_parity_blocks,
+                               node_info.num_global_parity_blocks);
+    }
+
+    for (int node_id = 0; node_id < num_nodes; node_id++) {
       ICPP23_2.show_repair_load_distribution(node_id);
     }
     // for (int node_id = num_nodes - 1; node_id >= 0; node_id--) {
@@ -209,7 +226,7 @@ public:
     //                            .num_stripes = num_stripes,
 
     //                            .num_nodes = 200,
-    //                            .num_clusters = 10});
+    //                            .num_clusters = num_clusters});
     //   ICPP23_1.insert_stripes(placement_strategy::ICPP23_1);
     //   ICPP23_1.show_repair_load_distribution(node_id);
     // }
@@ -603,8 +620,8 @@ private:
                                   std::vector<int> &bandwidth) {
     int num_nodes_per_cluster = conf_.num_nodes / conf_.num_clusters;
 
-    int normal_storage = 8, better_storage = 64;
-    int normal_bandwidth = 10, better_bandwidth = 100;
+    int normal_storage = 8, better_storage = 32;
+    int normal_bandwidth = 10, better_bandwidth = 40;
 
     int num_normal_clusters =
         conf_.num_clusters * (1 - conf_.heterogeneous_factor1);
@@ -697,6 +714,15 @@ private:
       for (auto node_id : stripe.node_ids) {
         nodes_info_[node_id].network_cost += 1;
         nodes_info_[node_id].storage_cost += 1;
+      }
+      for (int i = 0; i < stripe.K + stripe.G + stripe.L; i++) {
+        if (i < stripe.K) {
+          nodes_info_[stripe.node_ids[i]].num_data_blocks++;
+        } else if (i < stripe.K + stripe.G) {
+          nodes_info_[stripe.node_ids[i]].num_global_parity_blocks++;
+        } else {
+          nodes_info_[stripe.node_ids[i]].num_local_parity_blocks++;
+        }
       }
     }
   }
@@ -869,17 +895,18 @@ private:
       failed_stripe_ids.push_back(stripe_id);
     }
 
-    std::map<int, int> repair_load_distribution;
+    std::map<int, int> repair_load_distribution_node_level;
+    std::map<int, int> repair_load_distribution_cluster_level;
     for (auto stripe_id : failed_stripe_ids) {
       // 找到条带内的哪一个block损坏了
-      int failed_block_index;
+      int failed_block_index = -1;
       for (std::size_t i = 0; i < stripes_info_[stripe_id].node_ids.size();
            i++) {
         if (stripes_info_[stripe_id].node_ids[i] == node_id) {
           failed_block_index = i;
         }
       }
-      assert(failed_block_indexes.size() == 1);
+      assert(failed_block_index != -1);
 
       // 记录了本次修复涉及的cluster id
       std::vector<int> repair_span_cluster;
@@ -893,25 +920,26 @@ private:
                            new_locations_with_block_index);
       for (auto vec : blocks_to_read_in_each_cluster) {
         for (auto pr : vec) {
-          repair_load_distribution[pr.first]++;
+          repair_load_distribution_node_level[pr.first]++;
+        }
+      }
+      for (auto cluster_id : repair_span_cluster) {
+        if (cluster_id != nodes_info_[node_id].cluster_id) {
+          repair_load_distribution_cluster_level[cluster_id] += 1;
         }
       }
     }
 
-    std::cout << std::format("$$$$$${:4}号节点失效时：修复IO会分散到{}个节点上$"
-                             "$$$$$\n$$$$$$$$$$$$$$\n",
-                             node_id, repair_load_distribution.size());
-    for (auto pr : repair_load_distribution) {
-      if (nodes_info_[pr.first].cluster_id != nodes_info_[node_id].cluster_id) {
-        std::cout << "cross cluster: ";
-      } else {
-        std::cout << "               ";
-      }
-      std::cout << std::format(
-          "{:4}号节点上会产生{:8}的IO    ", pr.first,
-          static_cast<double>(pr.second) /
-              static_cast<double>(nodes_info_[pr.first].bandwidth));
-      nodes_info_[pr.first].print_info();
+    int sum = 0;
+    for (auto pr : repair_load_distribution_cluster_level) {
+      sum += pr.second;
+    }
+    std::cout << std::format(
+        "{:4}号节点失效时：修复IO会分散到{}个集群上，一共{}个跨集群IO\n",
+        node_id, repair_load_distribution_cluster_level.size(), sum);
+    for (auto pr : repair_load_distribution_cluster_level) {
+      std::cout << std::format("在{}号集群上产生{}跨集群IO\n", pr.first,
+                               pr.second);
     }
   }
 
@@ -1160,7 +1188,7 @@ int main() {
   //       lpr_copyset.by_equation());
   // }
 
-  data_placement::test_case_partition();
+  // data_placement::test_case_partition();
   // data_placement::test_case_placement();
   // data_placement::test_case_load_balance();
   // data_placement::test_case_data_loss_probability();
