@@ -60,10 +60,10 @@ void assert_enum() {
 }
 
 struct placement_config {
-  int K = 24, L = 4, G = 3;
+  int K = 8, L = 4, G = 3;
 
-  int num_nodes = 200;
-  int num_clusters = 10;
+  int num_nodes = 400;
+  int num_clusters = 20;
 
   // 优秀cluster占比
   double better_cluster_factor = 0.5;
@@ -76,6 +76,7 @@ struct placement_config {
   int better_node_storage = 32;
 
   double alpha = 0.5;
+  double xigema = 0.2;
 };
 
 struct node_info {
@@ -121,20 +122,23 @@ public:
     data_placement icpp23_random(placement_config{});
     data_placement icpp23_load_balance(placement_config{});
 
-    int num_stripes = 50000;
-    for (int i = 0; i < num_stripes; i++) {
-      icpp23_random.insert_one_stripe(placement_strategy::ICPP23_RANDOM);
-      icpp23_load_balance.insert_one_stripe(
-          placement_strategy::ICPP23_LOAD_BALANCE);
-    }
+    int num_iterations = 100;
+    for (int turn = 0; turn < num_iterations; turn++) {
+      int num_stripes = 50000 / num_iterations;
+      for (int i = 0; i < num_stripes; i++) {
+        icpp23_random.insert_one_stripe(placement_strategy::ICPP23_RANDOM);
+        icpp23_load_balance.insert_one_stripe(
+            placement_strategy::ICPP23_LOAD_BALANCE);
+      }
 
-    int num_reads = 950000;
-    std::default_random_engine generator;
-    zipfian_int_distribution<int> zipf_dis(0, num_stripes - 1, 0.9);
-    for (int i = 0; i < num_reads; i++) {
-      int stripe_id = num_stripes - zipf_dis(generator) - 1;
-      icpp23_random.read_one_stripe_data(stripe_id);
-      icpp23_load_balance.read_one_stripe_data(stripe_id);
+      int num_reads = 950000 / num_iterations;
+      std::default_random_engine generator;
+      zipfian_int_distribution<int> zipf_dis(0, num_stripes - 1, 0.9);
+      for (int i = 0; i < num_reads; i++) {
+        int stripe_id = num_stripes - zipf_dis(generator) - 1;
+        icpp23_random.read_one_stripe_data(stripe_id);
+        icpp23_load_balance.read_one_stripe_data(stripe_id);
+      }
     }
 
     icpp23_random.show_clusters_and_nodes();
@@ -172,7 +176,8 @@ private:
       selection_random(partition_plan, stripe_id, stripe.node_ids);
       break;
     case selection_strategy::LOAD_BALANCE:
-      selection_load_balance(partition_plan, stripe_id, stripe.node_ids);
+      selection_rw_and_repair_load_balance(partition_plan, stripe_id,
+                                           stripe.node_ids);
       break;
     default:
       std::terminate();
@@ -227,13 +232,9 @@ private:
            .cluster_bandwidth = static_cast<double>(cluster_bandwidth)});
       for (int j = 0; j < num_nodes_per_cluster; j++) {
         int storage;
-        if (i < num_normal_clusters) {
-          storage = (j < num_normal_nodes_per_cluster)
-                        ? conf_.normal_node_storage
-                        : conf_.better_node_storage;
-        } else {
-          storage = conf_.better_node_storage;
-        }
+        storage = (j < num_normal_nodes_per_cluster)
+                      ? conf_.normal_node_storage
+                      : conf_.better_node_storage;
         nodes_info_.push_back({.node_id = node_id,
                                .cluster_id = cluster_id,
                                .storage = static_cast<double>(storage)});
@@ -509,6 +510,167 @@ private:
       std::random_device rd{};
       std::mt19937 g(rd());
       std::shuffle(node_ids.begin(), node_ids.end(), g);
+
+      int node_idx = 0;
+      // data
+      for (int j = 0; j < partition_plan[i].first[0]; j++) {
+        int node_id = node_ids[node_idx++];
+        selected_nodes[partition_plan[i].second[0][j]] = node_id;
+        nodes_info_[node_id].stripe_ids.insert(stripe_id);
+      }
+      // local
+      for (int j = 0; j < partition_plan[i].first[1]; j++) {
+        int node_id = node_ids[node_idx++];
+        selected_nodes[partition_plan[i].second[1][j]] = node_id;
+        nodes_info_[node_id].stripe_ids.insert(stripe_id);
+      }
+      // global
+      for (int j = 0; j < partition_plan[i].first[2]; j++) {
+        int node_id = node_ids[node_idx++];
+        selected_nodes[partition_plan[i].second[2][j]] = node_id;
+        nodes_info_[node_id].stripe_ids.insert(stripe_id);
+      }
+    }
+  }
+
+  void selection_rw_and_repair_load_balance(
+      std::vector<std::pair<std::vector<int>,
+                            std::unordered_map<int, std::vector<int>>>>
+          partition_plan,
+      int stripe_id, std::vector<int> &selected_nodes) {
+    selected_nodes.resize(stripes_info_[stripe_id].K +
+                          stripes_info_[stripe_id].L +
+                          stripes_info_[stripe_id].G);
+
+    std::vector<int> cluster_ids;
+    for (const auto &cluster : clusters_info_) {
+      cluster_ids.push_back(cluster.cluster_id);
+    }
+    std::shuffle(cluster_ids.begin(), cluster_ids.end(),
+                 std::mt19937(std::random_device{}()));
+
+    double avg_storage_cost_cluster = 0;
+    for (const auto &cluster_id : cluster_ids) {
+      cluster_info cluster = clusters_info_[cluster_id];
+      avg_storage_cost_cluster += (cluster.storage_cost / cluster.storage);
+    }
+    avg_storage_cost_cluster /= static_cast<double>(cluster_ids.size());
+    double max_storage_cost_cluster =
+        (1 + conf_.xigema) * avg_storage_cost_cluster;
+
+    std::vector<int> candidate_cluster_ids;
+    std::vector<int> overload_cluster_ids;
+    for (const auto &cluster_id : cluster_ids) {
+      cluster_info cluster = clusters_info_[cluster_id];
+      if ((cluster.storage_cost / cluster.storage) <=
+          max_storage_cost_cluster) {
+        candidate_cluster_ids.push_back(cluster.cluster_id);
+      } else {
+        overload_cluster_ids.push_back(cluster.cluster_id);
+      }
+    }
+    for (const auto &cluster_id : overload_cluster_ids) {
+      if (candidate_cluster_ids.size() >= partition_plan.size()) {
+        break;
+      }
+      candidate_cluster_ids.push_back(cluster_id);
+    }
+    assert(candidate_cluster_ids.size() >= partition_plan.size());
+
+    std::vector<double> num_of_blocks_each_par;
+    std::vector<double> num_of_data_blocks_each_par;
+    for (const auto &partition : partition_plan) {
+      num_of_blocks_each_par.push_back(partition.first[0] + partition.first[1] +
+                                       partition.first[2]);
+      num_of_data_blocks_each_par.push_back(partition.first[0]);
+    }
+
+    double avg_data_blocks = 0;
+    for (std::size_t i = 0; i < partition_plan.size(); i++) {
+      avg_data_blocks += num_of_data_blocks_each_par[i];
+    }
+    avg_data_blocks = avg_data_blocks /
+                      static_cast<double>(num_of_data_blocks_each_par.size());
+
+    std::vector<std::pair<
+        std::pair<std::vector<int>, std::unordered_map<int, std::vector<int>>>,
+        double>>
+        prediction_cost_each_par;
+    for (std::size_t i = 0; i < partition_plan.size(); i++) {
+      double network_cost = num_of_data_blocks_each_par[i] / avg_data_blocks;
+      double prediction_cost = network_cost;
+      prediction_cost_each_par.push_back({partition_plan[i], prediction_cost});
+    }
+    // 将partition按预计开销降序排列
+    std::sort(prediction_cost_each_par.begin(), prediction_cost_each_par.end(),
+              [](std::pair<std::pair<std::vector<int>,
+                                     std::unordered_map<int, std::vector<int>>>,
+                           double> &a,
+                 std::pair<std::pair<std::vector<int>,
+                                     std::unordered_map<int, std::vector<int>>>,
+                           double> &b) { return a.second > b.second; });
+    partition_plan.clear();
+    for (const auto &partition : prediction_cost_each_par) {
+      partition_plan.push_back(partition.first);
+    }
+
+    std::vector<std::pair<int, double>> sorted_clusters;
+    for (const auto &cluster_id : candidate_cluster_ids) {
+      cluster_info cluster = clusters_info_[cluster_id];
+      double cluster_network_cost =
+          cluster.network_cost / cluster.cluster_bandwidth;
+      // 集群级别，根据网络负载排序
+      sorted_clusters.push_back({cluster.cluster_id, cluster_network_cost});
+    }
+    std::sort(sorted_clusters.begin(), sorted_clusters.end(),
+              [](std::pair<int, double> &a, std::pair<int, double> &b) {
+                return a.second < b.second;
+              });
+
+    int cluster_idx = 0;
+    for (std::size_t i = 0; i < partition_plan.size(); i++) {
+      cluster_info &cluster =
+          clusters_info_[sorted_clusters[cluster_idx++].first];
+      std::vector<int> node_ids_in_cluster = cluster.node_ids;
+      std::shuffle(node_ids_in_cluster.begin(), node_ids_in_cluster.end(),
+                   std::mt19937(std::random_device{}()));
+      double avg_storage_cost_node = 0;
+      for (const auto &node_id : node_ids_in_cluster) {
+        avg_storage_cost_node +=
+            (nodes_info_[node_id].storage_cost / nodes_info_[node_id].storage);
+      }
+      avg_storage_cost_node /= static_cast<double>(node_ids_in_cluster.size());
+      double max_storage_cost_node = (1 + conf_.xigema) * avg_storage_cost_node;
+
+      std::vector<int> candidate_node_ids;
+      std::vector<int> overload_node_ids;
+      for (const auto &node_id : node_ids_in_cluster) {
+        if ((nodes_info_[node_id].storage_cost /
+             nodes_info_[node_id].storage) <= max_storage_cost_node) {
+          candidate_node_ids.push_back(node_id);
+        } else {
+          overload_node_ids.push_back(node_id);
+        }
+      }
+      int sum_blocks = partition_plan[i].first[0] + partition_plan[i].first[1] +
+                       partition_plan[i].first[2];
+      for (const auto &node_id : overload_node_ids) {
+        if (candidate_node_ids.size() >= sum_blocks) {
+          break;
+        }
+        candidate_node_ids.push_back(node_id);
+      }
+      assert(candidate_node_ids.size() >= sum_blocks);
+
+      std::vector<int> node_ids;
+      for (const auto &node_id : candidate_node_ids) {
+        if (node_ids.size() == sum_blocks) {
+          break;
+        }
+        node_ids.push_back(node_id);
+      }
+      std::shuffle(node_ids.begin(), node_ids.end(),
+                   std::mt19937(std::random_device{}()));
 
       int node_idx = 0;
       // data
