@@ -114,7 +114,9 @@ struct stripe_info {
 
 class data_placement {
 public:
-  data_placement(placement_config conf) : conf_(conf) {
+  data_placement(placement_config conf)
+      : conf_(conf), shuffle_clusters_(std::mt19937(std::random_device{}())),
+        shuffle_nodes_(std::mt19937(std::random_device{}())) {
     init_clusters_and_nodes();
   }
 
@@ -546,8 +548,7 @@ private:
     for (const auto &cluster : clusters_info_) {
       cluster_ids.push_back(cluster.cluster_id);
     }
-    std::shuffle(cluster_ids.begin(), cluster_ids.end(),
-                 std::mt19937(std::random_device{}()));
+    std::shuffle(cluster_ids.begin(), cluster_ids.end(), shuffle_clusters_);
 
     double avg_storage_cost_cluster = 0;
     for (const auto &cluster_id : cluster_ids) {
@@ -633,7 +634,7 @@ private:
           clusters_info_[sorted_clusters[cluster_idx++].first];
       std::vector<int> node_ids_in_cluster = cluster.node_ids;
       std::shuffle(node_ids_in_cluster.begin(), node_ids_in_cluster.end(),
-                   std::mt19937(std::random_device{}()));
+                   shuffle_nodes_);
       double avg_storage_cost_node = 0;
       for (const auto &node_id : node_ids_in_cluster) {
         avg_storage_cost_node +=
@@ -669,8 +670,6 @@ private:
         }
         node_ids.push_back(node_id);
       }
-      std::shuffle(node_ids.begin(), node_ids.end(),
-                   std::mt19937(std::random_device{}()));
 
       int node_idx = 0;
       // data
@@ -1141,6 +1140,9 @@ private:
   std::unordered_map<int, stripe_info> stripes_info_;
 
   int next_stripe_id_ = 0;
+
+  std::mt19937 shuffle_clusters_;
+  std::mt19937 shuffle_nodes_;
 };
 
 int main() {
