@@ -3,15 +3,21 @@
 #include <cstddef>
 #include <exception>
 #include <format>
+#include <future>
 #include <iostream>
+#include <limits>
+#include <mutex>
 #include <numeric>
 #include <random>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "../tools.hpp"
 #include "zipf.h"
+
 enum class partition_strategy { RANDOM, ECWIDE, ICPP23 };
 
 enum class selection_strategy { RANDOM, LOAD_BALANCE };
@@ -62,8 +68,8 @@ void assert_enum() {
 struct placement_config {
   int K = 8, L = 4, G = 3;
 
-  int num_nodes = 400;
-  int num_clusters = 20;
+  int num_nodes = 5000;
+  int num_clusters = 100;
 
   // 优秀cluster占比
   double better_cluster_factor = 0.5;
@@ -118,17 +124,27 @@ public:
       : conf_(conf), shuffle_clusters_(std::mt19937(std::random_device{}())),
         shuffle_nodes_(std::mt19937(std::random_device{}())) {
     init_clusters_and_nodes();
+    repair_load_distributions_node_cha_cluster.resize(
+        nodes_info_.size(), std::vector<int>(clusters_info_.size(), 0));
+    repair_load_distributions_cluster_cha_cluster.resize(
+        clusters_info_.size(), std::vector<double>(clusters_info_.size(), 0));
+    for (const auto &node : nodes_info_) {
+      failed_node_ids_.push_back(node.node_id);
+    }
+    std::shuffle(failed_node_ids_.begin(), failed_node_ids_.end(),
+                 shuffle_nodes_);
+    failed_node_ids_.resize(nodes_info_.size() / 100);
   }
 
   static void test_case_load_balance() {
-    data_placement icpp23_random(placement_config{});
+    // data_placement icpp23_random(placement_config{});
     data_placement icpp23_load_balance(placement_config{});
 
     int num_iterations = 100;
     for (int turn = 0; turn < num_iterations; turn++) {
       int num_stripes = 50000 / num_iterations;
       for (int i = 0; i < num_stripes; i++) {
-        icpp23_random.insert_one_stripe(placement_strategy::ICPP23_RANDOM);
+        // icpp23_random.insert_one_stripe(placement_strategy::ICPP23_RANDOM);
         icpp23_load_balance.insert_one_stripe(
             placement_strategy::ICPP23_LOAD_BALANCE);
       }
@@ -138,13 +154,98 @@ public:
       zipfian_int_distribution<int> zipf_dis(0, num_stripes - 1, 0.9);
       for (int i = 0; i < num_reads; i++) {
         int stripe_id = num_stripes - zipf_dis(generator) - 1;
-        icpp23_random.read_one_stripe_data(stripe_id);
+        // icpp23_random.read_one_stripe_data(stripe_id);
         icpp23_load_balance.read_one_stripe_data(stripe_id);
       }
     }
 
-    icpp23_random.show_clusters_and_nodes();
+    // icpp23_random.show_clusters_and_nodes();
     icpp23_load_balance.show_clusters_and_nodes();
+  }
+
+  static void test_case_loss_probability() {
+    std::vector<int> num_clusters = {10, 20, 40, 50, 100, 125, 150};
+    for (const auto &num_c : num_clusters) {
+      std::cout << std::format("\nzhaoritian\n");
+      double test_times = 100;
+      int blocks_per_node = 50000;
+
+      int count = 0;
+      std::mutex m;
+
+      std::vector<std::future<int>> results;
+      for (int thr = 0; thr < 4; thr++) {
+        results.push_back(std::async(std::launch::async, [&]() -> int {
+          int failed_times = 0;
+          while (true) {
+            m.lock();
+            if (count == test_times) {
+              m.unlock();
+              return failed_times;
+            }
+            count++;
+            m.unlock();
+
+            data_placement icpp23_random(
+                placement_config{.num_clusters = num_c});
+            std::unordered_set<int> failed_node_ids;
+            for (const auto &node_id : icpp23_random.failed_node_ids_) {
+              failed_node_ids.insert(node_id);
+            }
+
+            double num_all_blocks =
+                static_cast<double>(icpp23_random.conf_.num_nodes) *
+                static_cast<double>(blocks_per_node);
+            double num_blocks_each_stripe = icpp23_random.conf_.K +
+                                            icpp23_random.conf_.G +
+                                            icpp23_random.conf_.L;
+            std::uint64_t num_stripes = num_all_blocks / num_blocks_each_stripe;
+
+            for (std::uint64_t i = 0; i < num_stripes; i++) {
+              icpp23_random.insert_one_stripe(
+                  placement_strategy::ICPP23_RANDOM);
+              int stripe_id = icpp23_random.next_stripe_id_ - 1;
+              std::vector<int> failed_node_ids_in_stripe;
+              for (const auto &node_id :
+                   icpp23_random.stripes_info_[stripe_id].node_ids) {
+                if (failed_node_ids.contains(node_id)) {
+                  failed_node_ids_in_stripe.push_back(node_id);
+                }
+              }
+              if (failed_node_ids_in_stripe.size() >
+                  icpp23_random.conf_.G + 1) {
+                std::cout << std::format("\n[\n");
+                std::cout << std::format(
+                    "num_stripes：{}，num_nodes：{}，num_clusters：{}\n",
+                    num_stripes, icpp23_random.conf_.num_nodes,
+                    icpp23_random.conf_.num_clusters);
+                std::cout << std::format("丢数据stripe {} 包含的节点：",
+                                         stripe_id);
+                print1DVector(icpp23_random.stripes_info_[stripe_id].node_ids);
+                std::cout << std::format("条带中失败的节点: ");
+                print1DVector(failed_node_ids_in_stripe);
+                std::cout << std::format("整个集群失败的节点: ");
+                print1DVector(icpp23_random.failed_node_ids_);
+                std::cout << "]\n";
+                failed_times++;
+                break;
+              }
+            }
+            // icpp23_random.show_clusters_and_nodes();
+          }
+          return failed_times;
+        }));
+      }
+
+      double total_failed_times = 0;
+      for (auto &f : results) {
+        total_failed_times += static_cast<double>(f.get());
+      }
+
+      std::cout << std::format(
+          "num_clusters：{}， 一共测试{}次，数据丢失{}次，比例为{}\n", num_c,
+          test_times, total_failed_times, total_failed_times / test_times);
+    }
   }
 
 private:
@@ -200,6 +301,38 @@ private:
         nodes_info_[stripe.node_ids[i]].num_local_parity_blocks++;
       }
     }
+
+    // for (int failed_block_index = 0;
+    //      failed_block_index < conf_.K + conf_.L + conf_.G;
+    //      failed_block_index++) {
+    //   node_info node = nodes_info_[stripe.node_ids[failed_block_index]];
+
+    //   // 记录了本次修复涉及的cluster id
+    //   std::vector<int> repair_span_cluster;
+    //   //
+    //   记录了需要从哪些cluster中,读取哪些block,记录顺序和repair_span_cluster对应
+    //   // cluster_id->vector(node_id, block_index)
+    //   std::vector<std::vector<std::pair<int, int>>>
+    //       blocks_to_read_in_each_cluster;
+    //   std::vector<std::pair<int, int>> new_locations_with_block_index;
+    //   generate_repair_plan(stripe_id, failed_block_index,
+    //                        blocks_to_read_in_each_cluster,
+    //                        repair_span_cluster,
+    //                        new_locations_with_block_index);
+    //   for (const auto &cluster_id : repair_span_cluster) {
+    //     if (cluster_id != node.cluster_id) {
+    //       repair_load_distributions_node_cha_cluster[node.node_id]
+    //                                                 [cluster_id] += 1;
+
+    //       repair_load_distributions_cluster_cha_cluster[node.cluster_id]
+    //                                                    [cluster_id] +=
+    //           (1 / static_cast<double>(
+    //                    clusters_info_[cluster_id].cluster_bandwidth));
+    //     }
+    //   }
+    // }
+
+    // std::cout << std::format("{} stripe inserted\n", stripe_id);
   }
 
   void read_one_stripe_data(int stripe_id) {
@@ -304,52 +437,61 @@ private:
   }
 
   void show_repair_load_distribution_cross_cluster() {
-    std::vector<std::vector<int>> distribution(
-        nodes_info_.size(), std::vector<int>(clusters_info_.size(), 0));
-    for (const auto &node : nodes_info_) {
-      for (const auto &stripe_id : node.stripe_ids) {
-        // 找到条带内的哪一个block损坏了
-        int failed_block_index = -1;
-        for (std::size_t i = 0; i < stripes_info_[stripe_id].node_ids.size();
-             i++) {
-          if (stripes_info_[stripe_id].node_ids[i] == node.node_id) {
-            failed_block_index = i;
-          }
-        }
-        assert(failed_block_index != -1);
-
-        // 记录了本次修复涉及的cluster id
-        std::vector<int> repair_span_cluster;
-        // 记录了需要从哪些cluster中,读取哪些block,记录顺序和repair_span_cluster对应
-        // cluster_id->vector(node_id, block_index)
-        std::vector<std::vector<std::pair<int, int>>>
-            blocks_to_read_in_each_cluster;
-        std::vector<std::pair<int, int>> new_locations_with_block_index;
-        generate_repair_plan(
-            stripe_id, failed_block_index, blocks_to_read_in_each_cluster,
-            repair_span_cluster, new_locations_with_block_index);
-        for (const auto &cluster_id : repair_span_cluster) {
-          if (cluster_id != node.cluster_id) {
-            distribution[node.node_id][cluster_id] += 1;
-          }
-        }
-      }
-    }
-
-    for (std::size_t node_id = 0; node_id < distribution.size(); node_id++) {
-      const auto &load_in_each_cluster = distribution[node_id];
-      std::cout << std::format("{}号节点宕机，一共产生{}跨集群IO。\n", node_id,
+    for (std::size_t node_id = 0;
+         node_id < repair_load_distributions_node_cha_cluster.size();
+         node_id++) {
+      const auto &load_in_each_cluster =
+          repair_load_distributions_node_cha_cluster[node_id];
+      std::cout << std::format("{:4}号节点宕机，一共产生{:6}跨集群IO：\n",
+                               node_id,
                                std::accumulate(load_in_each_cluster.begin(),
                                                load_in_each_cluster.end(), 0));
       for (std::size_t cluster_id = 0; cluster_id < load_in_each_cluster.size();
            cluster_id++) {
         if (cluster_id != nodes_info_[node_id].cluster_id &&
             load_in_each_cluster[cluster_id] != 0) {
-          std::cout << std::format("----在{}号集群产生{}跨集群IO\n", cluster_id,
-                                   load_in_each_cluster[cluster_id]);
+          std::cout << std::format(
+              "----在{:4}号集群产生{:6}跨集群IO\n", cluster_id,
+              static_cast<double>(load_in_each_cluster[cluster_id]) /
+                  clusters_info_[cluster_id].cluster_bandwidth);
         }
       }
     }
+  }
+
+  std::vector<int> get_repair_load_distribution_cross_cluster(int node_id) {
+    node_info node = nodes_info_[node_id];
+
+    std::vector<int> distribution(clusters_info_.size(), 0);
+    for (const auto &stripe_id : node.stripe_ids) {
+      // 找到条带内的哪一个block损坏了
+      int failed_block_index = -1;
+      for (std::size_t i = 0; i < stripes_info_[stripe_id].node_ids.size();
+           i++) {
+        if (stripes_info_[stripe_id].node_ids[i] == node.node_id) {
+          failed_block_index = i;
+        }
+      }
+      assert(failed_block_index != -1);
+
+      // 记录了本次修复涉及的cluster id
+      std::vector<int> repair_span_cluster;
+      // 记录了需要从哪些cluster中,读取哪些block,记录顺序和repair_span_cluster对应
+      // cluster_id->vector(node_id, block_index)
+      std::vector<std::vector<std::pair<int, int>>>
+          blocks_to_read_in_each_cluster;
+      std::vector<std::pair<int, int>> new_locations_with_block_index;
+      generate_repair_plan(stripe_id, failed_block_index,
+                           blocks_to_read_in_each_cluster, repair_span_cluster,
+                           new_locations_with_block_index);
+      for (const auto &cluster_id : repair_span_cluster) {
+        if (cluster_id != node.cluster_id) {
+          distribution[cluster_id] += 1;
+        }
+      }
+    }
+
+    return distribution;
   }
 
   void selection_random(
@@ -357,41 +499,29 @@ private:
                             std::unordered_map<int, std::vector<int>>>>
           partition_plan,
       int stripe_id, std::vector<int> &selected_nodes) {
+
     selected_nodes.resize(stripes_info_[stripe_id].K +
                           stripes_info_[stripe_id].L +
                           stripes_info_[stripe_id].G);
-    std::random_device rd_cluster;
-    std::mt19937 gen_cluster(rd_cluster());
-    std::uniform_int_distribution<int> dis_cluster(0,
-                                                   clusters_info_.size() - 1);
 
-    std::vector<bool> visited_clusters(clusters_info_.size(), false);
+    std::vector<int> cluster_ids;
+    for (const auto &cluster : clusters_info_) {
+      cluster_ids.push_back(cluster.cluster_id);
+    }
+    std::shuffle(cluster_ids.begin(), cluster_ids.end(), shuffle_clusters_);
+    int cluster_idx = 0;
 
     for (std::size_t i = 0; i < partition_plan.size(); i++) {
-      int cluster_id;
-      do {
-        cluster_id = dis_cluster(gen_cluster);
-      } while (visited_clusters[cluster_id] == true);
-      visited_clusters[cluster_id] = true;
-      cluster_info &cluster = clusters_info_[cluster_id];
+      cluster_info &cluster = clusters_info_[cluster_ids[cluster_idx++]];
 
-      std::random_device rd_node;
-      std::mt19937 gen_node(rd_node());
-      std::uniform_int_distribution<int> dis_node(0,
-                                                  cluster.node_ids.size() - 1);
+      std::vector<int> node_ids = cluster.node_ids;
+      std::shuffle(node_ids.begin(), node_ids.end(), shuffle_nodes_);
+      int node_idx = 0;
 
-      std::vector<bool> visited_nodes(cluster.node_ids.size(), false);
-
-      auto find_a_node_for_a_block = [&, this](int &block_idx) {
-        int node_idx;
-        do {
-          // 注意,此处是node_idx,而非node_id
-          // cluster.node_ids[node_idx]才是node_id
-          node_idx = dis_node(gen_node);
-        } while (visited_nodes[node_idx] == true);
-        visited_nodes[node_idx] = true;
-        selected_nodes[block_idx] = cluster.node_ids[node_idx];
-        nodes_info_[cluster.node_ids[node_idx]].stripe_ids.insert(stripe_id);
+      auto find_a_node_for_a_block = [&, this](int block_idx) {
+        selected_nodes[block_idx] = node_ids[node_idx];
+        nodes_info_[node_ids[node_idx]].stripe_ids.insert(stripe_id);
+        node_idx++;
       };
 
       for (int j = 0; j < partition_plan[i].first[0]; j++) {
@@ -413,9 +543,16 @@ private:
                             std::unordered_map<int, std::vector<int>>>>
           partition_plan,
       int stripe_id, std::vector<int> &selected_nodes) {
+
     selected_nodes.resize(stripes_info_[stripe_id].K +
                           stripes_info_[stripe_id].L +
                           stripes_info_[stripe_id].G);
+
+    std::vector<int> cluster_ids;
+    for (const auto &cluster : clusters_info_) {
+      cluster_ids.push_back(cluster.cluster_id);
+    }
+    std::shuffle(cluster_ids.begin(), cluster_ids.end(), shuffle_clusters_);
 
     std::vector<double> num_of_blocks_each_par;
     std::vector<double> num_of_data_blocks_each_par;
@@ -465,7 +602,8 @@ private:
                                       cluster_avg_network_cost);
 
     std::vector<std::pair<int, double>> sorted_clusters;
-    for (auto &cluster : clusters_info_) {
+    for (const auto &cluster_id : cluster_ids) {
+      cluster_info cluster = clusters_info_[cluster_id];
       double cluster_storage_cost = cluster.storage_cost / cluster.storage;
       double cluster_network_cost =
           cluster.network_cost / cluster.cluster_bandwidth;
@@ -488,7 +626,7 @@ private:
           clusters_info_[sorted_clusters[cluster_idx++].first];
 
       std::vector<std::pair<int, double>> sorted_nodes_in_each_cluster;
-      for (auto &node_id : cluster.node_ids) {
+      for (const auto &node_id : cluster.node_ids) {
         node_info &node = nodes_info_[node_id];
         double node_storage_cost = node.storage_cost / node.storage;
         // 节点级别，根据存储负载排序
@@ -509,9 +647,7 @@ private:
           break;
         }
       }
-      std::random_device rd{};
-      std::mt19937 g(rd());
-      std::shuffle(node_ids.begin(), node_ids.end(), g);
+      std::shuffle(node_ids.begin(), node_ids.end(), shuffle_nodes_);
 
       int node_idx = 0;
       // data
@@ -578,63 +714,86 @@ private:
     }
     assert(candidate_cluster_ids.size() >= partition_plan.size());
 
-    std::vector<double> num_of_blocks_each_par;
-    std::vector<double> num_of_data_blocks_each_par;
-    for (const auto &partition : partition_plan) {
-      num_of_blocks_each_par.push_back(partition.first[0] + partition.first[1] +
-                                       partition.first[2]);
-      num_of_data_blocks_each_par.push_back(partition.first[0]);
+    candidate_cluster_ids.clear();
+    for (const auto &cluster : clusters_info_) {
+      candidate_cluster_ids.push_back(cluster.cluster_id);
     }
+    std::shuffle(candidate_cluster_ids.begin(), candidate_cluster_ids.end(),
+                 shuffle_clusters_);
+    if (stripe_id == 10000) {
+      int a = 0;
+      a++;
+    }
+    // double min_cost = std::numeric_limits<double>::max();
+    // int initial_cluster = -1;
+    // for (const auto &cluster_id : candidate_cluster_ids) {
+    //   cluster_info cluster = clusters_info_[cluster_id];
 
-    double avg_data_blocks = 0;
-    for (std::size_t i = 0; i < partition_plan.size(); i++) {
-      avg_data_blocks += num_of_data_blocks_each_par[i];
-    }
-    avg_data_blocks = avg_data_blocks /
-                      static_cast<double>(num_of_data_blocks_each_par.size());
+    //   double cost = 0;
+    //   for (const auto &other_id : candidate_cluster_ids) {
+    //     cost += (repair_load_distributions_cluster_cha_cluster[cluster_id]
+    //                                                           [other_id]);
+    //   }
 
-    std::vector<std::pair<
-        std::pair<std::vector<int>, std::unordered_map<int, std::vector<int>>>,
-        double>>
-        prediction_cost_each_par;
-    for (std::size_t i = 0; i < partition_plan.size(); i++) {
-      double network_cost = num_of_data_blocks_each_par[i] / avg_data_blocks;
-      double prediction_cost = network_cost;
-      prediction_cost_each_par.push_back({partition_plan[i], prediction_cost});
+    //   if (min_cost > cost) {
+    //     min_cost = cost;
+    //     initial_cluster = cluster_id;
+    //   }
+    // }
+    double min_cost = std::numeric_limits<double>::max();
+    int initial_cluster_id1 = -1;
+    int initial_cluster_id2 = -1;
+    for (const auto &cluster_id1 : candidate_cluster_ids) {
+      for (const auto &cluster_id2 : candidate_cluster_ids) {
+        double cost = 0;
+        if (cluster_id1 != cluster_id2) {
+          cost = repair_load_distributions_cluster_cha_cluster[cluster_id1]
+                                                              [cluster_id2] +
+                 repair_load_distributions_cluster_cha_cluster[cluster_id2]
+                                                              [cluster_id1];
+          if (min_cost > cost) {
+            min_cost = cost;
+            initial_cluster_id1 = cluster_id1;
+            initial_cluster_id2 = cluster_id2;
+          }
+        }
+      }
     }
-    // 将partition按预计开销降序排列
-    std::sort(prediction_cost_each_par.begin(), prediction_cost_each_par.end(),
-              [](std::pair<std::pair<std::vector<int>,
-                                     std::unordered_map<int, std::vector<int>>>,
-                           double> &a,
-                 std::pair<std::pair<std::vector<int>,
-                                     std::unordered_map<int, std::vector<int>>>,
-                           double> &b) { return a.second > b.second; });
-    partition_plan.clear();
-    for (const auto &partition : prediction_cost_each_par) {
-      partition_plan.push_back(partition.first);
+    std::unordered_set<int> P{initial_cluster_id1, initial_cluster_id2};
+    while (P.size() < partition_plan.size()) {
+      double min_cost = std::numeric_limits<double>::max();
+      double new_cluster_id = -1;
+      for (const auto &cluster_id : candidate_cluster_ids) {
+        double cost = 0;
+        if (P.contains(cluster_id) == false) {
+          for (const auto &other_id : P) {
+            cost += (repair_load_distributions_cluster_cha_cluster[cluster_id]
+                                                                  [other_id] +
+                     repair_load_distributions_cluster_cha_cluster[other_id]
+                                                                  [cluster_id]);
+          }
+          if (min_cost > cost) {
+            min_cost = cost;
+            new_cluster_id = cluster_id;
+          }
+        }
+      }
+      P.insert(new_cluster_id);
     }
-
-    std::vector<std::pair<int, double>> sorted_clusters;
-    for (const auto &cluster_id : candidate_cluster_ids) {
-      cluster_info cluster = clusters_info_[cluster_id];
-      double cluster_network_cost =
-          cluster.network_cost / cluster.cluster_bandwidth;
-      // 集群级别，根据网络负载排序
-      sorted_clusters.push_back({cluster.cluster_id, cluster_network_cost});
-    }
-    std::sort(sorted_clusters.begin(), sorted_clusters.end(),
-              [](std::pair<int, double> &a, std::pair<int, double> &b) {
-                return a.second < b.second;
-              });
+    candidate_cluster_ids.clear();
+    candidate_cluster_ids.resize(P.size());
+    std::copy(P.begin(), P.end(), candidate_cluster_ids.begin());
+    std::shuffle(candidate_cluster_ids.begin(), candidate_cluster_ids.end(),
+                 shuffle_clusters_);
 
     int cluster_idx = 0;
     for (std::size_t i = 0; i < partition_plan.size(); i++) {
       cluster_info &cluster =
-          clusters_info_[sorted_clusters[cluster_idx++].first];
+          clusters_info_[candidate_cluster_ids[cluster_idx++]];
       std::vector<int> node_ids_in_cluster = cluster.node_ids;
       std::shuffle(node_ids_in_cluster.begin(), node_ids_in_cluster.end(),
                    shuffle_nodes_);
+
       double avg_storage_cost_node = 0;
       for (const auto &node_id : node_ids_in_cluster) {
         avg_storage_cost_node +=
@@ -663,12 +822,26 @@ private:
       }
       assert(candidate_node_ids.size() >= sum_blocks);
 
+      // std::vector<std::pair<int, int>> sum_distributions;
+      // for (const auto &node_id : candidate_node_ids) {
+      //   sum_distributions.push_back(
+      //       {node_id,
+      //        std::accumulate(repair_load_distributions_node_cha_cluster[node_id].begin(),
+      //                        repair_load_distributions_node_cha_cluster[node_id].end(),
+      //                        0)});
+      // }
+      // std::sort(sum_distributions.begin(), sum_distributions.end(),
+      //           [](const std::pair<int, int> &a, const std::pair<int, int>
+      //           &b) {
+      //             return a.second < b.second;
+      //           });
+
       std::vector<int> node_ids;
-      for (const auto &node_id : candidate_node_ids) {
+      for (const auto &pr : candidate_node_ids) {
         if (node_ids.size() == sum_blocks) {
           break;
         }
-        node_ids.push_back(node_id);
+        node_ids.push_back(pr);
       }
 
       int node_idx = 0;
@@ -1138,6 +1311,10 @@ private:
   std::vector<cluster_info> clusters_info_;
   std::vector<node_info> nodes_info_;
   std::unordered_map<int, stripe_info> stripes_info_;
+  std::vector<std::vector<int>> repair_load_distributions_node_cha_cluster;
+  std::vector<std::vector<double>>
+      repair_load_distributions_cluster_cha_cluster;
+  std::vector<int> failed_node_ids_;
 
   int next_stripe_id_ = 0;
 
@@ -1148,7 +1325,11 @@ private:
 int main() {
   assert_enum();
 
-  data_placement::test_case_load_balance();
+  std::cout << std::format("cpu有{}个核\n",
+                           std::thread::hardware_concurrency());
+
+  // data_placement::test_case_load_balance();
+  data_placement::test_case_loss_probability();
 
   return 0;
 }
