@@ -164,17 +164,18 @@ public:
   }
 
   static void test_case_loss_probability() {
-    std::vector<int> num_clusters = {10, 20, 40, 50, 100, 125, 150};
+    std::vector<int> num_clusters = {10, 20, 40, 50, 100, 125, 250};
+    std::reverse(num_clusters.begin(), num_clusters.end());
     for (const auto &num_c : num_clusters) {
       std::cout << std::format("\nzhaoritian\n");
       double test_times = 100;
-      int blocks_per_node = 50000;
+      int blocks_per_node = 15000;
 
       int count = 0;
       std::mutex m;
 
       std::vector<std::future<int>> results;
-      for (int thr = 0; thr < 4; thr++) {
+      for (int thr = 0; thr < 2; thr++) {
         results.push_back(std::async(std::launch::async, [&]() -> int {
           int failed_times = 0;
           while (true) {
