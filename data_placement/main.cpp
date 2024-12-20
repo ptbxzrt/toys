@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
-#include <format>
+#include <fmt/core.h>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -47,7 +47,7 @@ struct node_info {
   std::unordered_set<int> stripe_ids;
 
   void print_info() const {
-    std::cout << std::format("Node ID: {:6}, Cluster ID: {:4}, Storage: {:4}, "
+    std::cout << fmt::format("Node ID: {:6}, Cluster ID: {:4}, Storage: {:4}, "
                              "Bandwidth: {:4}\n",
                              node_id, cluster_id, storage, bandwidth);
   }
@@ -170,22 +170,22 @@ public:
                              .num_clusters = num_clusters});
 
     random.insert_stripes(placement_strategy::random);
-    std::cout << std::format("placement_strategy {}\n",
+    std::cout << fmt::format("placement_strategy {}\n",
                              "placement_strategy::random");
     random.show_load_balance();
 
     ecwide.insert_stripes(placement_strategy::ECWIDE);
-    std::cout << std::format("placement_strategy {}\n",
+    std::cout << fmt::format("placement_strategy {}\n",
                              "placement_strategy::ECWIDE");
     ecwide.show_load_balance();
 
     icpp23_1.insert_stripes(placement_strategy::ICPP23_1);
-    std::cout << std::format("placement_strategy {}\n",
+    std::cout << fmt::format("placement_strategy {}\n",
                              "placement_strategy::ICPP23_1");
     icpp23_1.show_load_balance();
 
     icpp23_2.insert_stripes(placement_strategy::ICPP23_2);
-    std::cout << std::format("placement_strategy {}\n",
+    std::cout << fmt::format("placement_strategy {}\n",
                              "placement_strategy::ICPP23_2");
     icpp23_2.show_load_balance();
   }
@@ -196,7 +196,7 @@ public:
     int num_nodes = 231;
     int num_clusters = 11;
 
-    std::cout << std::format("placement_strategy {}\n",
+    std::cout << fmt::format("placement_strategy {}\n",
                              "placement_strategy::ICPP23_2");
     data_placement ICPP23_2({.K = 8,
                              .L = 4,
@@ -207,7 +207,7 @@ public:
                              .num_clusters = num_clusters});
     ICPP23_2.insert_stripes(placement_strategy::ICPP23_2);
     for (auto node_info : ICPP23_2.nodes_info_) {
-      std::cout << std::format("{:4}号节点，数据块数量{:6}，局部校验块数量{:"
+      std::cout << fmt::format("{:4}号节点，数据块数量{:6}，局部校验块数量{:"
                                "6}，全局校验块数量{}\n",
                                node_info.node_id, node_info.num_data_blocks,
                                node_info.num_local_parity_blocks,
@@ -218,7 +218,7 @@ public:
       ICPP23_2.show_repair_load_distribution(node_id);
     }
     // for (int node_id = num_nodes - 1; node_id >= 0; node_id--) {
-    //   std::cout << std::format("placement_strategy {}\n",
+    //   std::cout << fmt::format("placement_strategy {}\n",
     //                            "placement_strategy::ICPP23_1");
     //   data_placement ICPP23_1({.K = 16,
     //                            .L = 4,
@@ -235,7 +235,7 @@ public:
   // 测试数据丢失概率
   static void test_case_data_loss_probability() {
     int num_stripes = 1000000;
-    std::cout << std::format("placement_strategy {}\n",
+    std::cout << fmt::format("placement_strategy {}\n",
                              "placement_strategy::random");
     show_data_loss_probability({.K = 8,
                                 .L = 4,
@@ -777,7 +777,7 @@ private:
     } else {
       assert(false);
     }
-    std::cout << std::format("partition strategy {}\n", ps_str);
+    std::cout << fmt::format("partition strategy {}\n", ps_str);
     print2DVector(partition_plan);
   }
 
@@ -811,7 +811,7 @@ private:
       assert(false);
     }
 
-    std::cout << std::format("placement strategy {}\n", ps_str);
+    std::cout << fmt::format("placement strategy {}\n", ps_str);
     for (auto node_id : stripes_info_[stripe_id].node_ids) {
       nodes_info_[node_id].print_info();
     }
@@ -839,7 +839,7 @@ private:
       avg_network_cost /= static_cast<double>(nodes_info_.size());
       storage_bias = (max_storage_cost - avg_storage_cost) / avg_storage_cost;
       network_bias = (max_network_cost - avg_network_cost) / avg_network_cost;
-      std::cout << std::format("节点级别的load balance测试：存储{}，网络{}。\n",
+      std::cout << fmt::format("节点级别的load balance测试：存储{}，网络{}。\n",
                                storage_bias, network_bias);
     }
 
@@ -862,7 +862,7 @@ private:
       avg_network_cost /= static_cast<double>(clusters_info_.size());
       storage_bias = (max_storage_cost - avg_storage_cost) / avg_storage_cost;
       network_bias = (max_network_cost - avg_network_cost) / avg_network_cost;
-      std::cout << std::format("集群级别的load balance测试：存储{}，网络{}。\n",
+      std::cout << fmt::format("集群级别的load balance测试：存储{}，网络{}。\n",
                                storage_bias, network_bias);
     }
   }
@@ -878,13 +878,13 @@ private:
       if (data_loss.check_data_loss(failure_rate)) {
         data_loss_times++;
       }
-      std::cout << std::format("第{}次实验，一共失败了{}次:\n", i,
+      std::cout << fmt::format("第{}次实验，一共失败了{}次:\n", i,
                                data_loss_times);
     }
 
     double loss_probability =
         static_cast<double>(data_loss_times) / static_cast<double>(test_times);
-    std::cout << std::format("数据丢失的概率为{}\n", loss_probability);
+    std::cout << fmt::format("数据丢失的概率为{}\n", loss_probability);
   }
 
   void show_repair_load_distribution(int node_id) {
@@ -934,11 +934,11 @@ private:
     for (auto pr : repair_load_distribution_cluster_level) {
       sum += pr.second;
     }
-    std::cout << std::format(
+    std::cout << fmt::format(
         "{:4}号节点失效时：修复IO会分散到{}个集群上，一共{}个跨集群IO\n",
         node_id, repair_load_distribution_cluster_level.size(), sum);
     for (auto pr : repair_load_distribution_cluster_level) {
-      std::cout << std::format("在{}号集群上产生{}跨集群IO\n", pr.first,
+      std::cout << fmt::format("在{}号集群上产生{}跨集群IO\n", pr.first,
                                pr.second);
     }
   }
@@ -1181,7 +1181,7 @@ int main() {
   //        .replication_factor = 3,
   //        .blocks_per_node = 10000,
   //        .scatter_width = 200});
-  //   std::cout << std::format(
+  //   std::cout << fmt::format(
   //       "系统共有{:6}个节点，有{:.2f}"
   //       "的节点损坏，通过公式计算数据丢失概率，随机模式为{}，copyset模式为{}\n",
   //       num_nodes, failure_rate, lpr_random.by_equation(),

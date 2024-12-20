@@ -1,7 +1,7 @@
 #include "zipf.h"
 #include <cassert>
 #include <cmath>
-#include <format>
+#include <fmt/core.h>
 #include <iostream>
 #include <map>
 
@@ -48,7 +48,7 @@ int main() {
     std::cout << "Key: " << pair.first << ", Value: " << pair.second
               << std::endl;
   }
-  std::cout << std::format("num_writes: {}, num_reads: {}, next_id: {}\n",
+  std::cout << fmt::format("num_writes: {}, num_reads: {}, next_id: {}\n",
                            num_writes, num_reads, next_id);
 
   return 0;

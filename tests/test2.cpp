@@ -1,7 +1,7 @@
 #include "../tools.hpp"
 #include <algorithm>
 #include <cstddef>
-#include <format>
+#include <fmt/core.h>
 #include <iostream>
 #include <map>
 #include <random>
@@ -33,7 +33,7 @@ void case1() {
 
   for (auto &pr : nodes) {
     std::cout
-        << std::format(
+        << fmt::format(
                "为了修复0号节点上存储的0号数据块，{}号节点参与修复的次数{}",
                pr.first, pr.second)
         << std::endl;
@@ -64,7 +64,7 @@ void case2() {
 
   for (auto &pr : nodes) {
     std::cout
-        << std::format(
+        << fmt::format(
                "为了修复0号节点上存储的6号全局校验块，{}号节点参与修复的次数{}",
                pr.first, pr.second)
         << std::endl;
@@ -85,7 +85,7 @@ void case3() {
   //                                blocks_permutation.end());
   // }
 
-  // std::cout << std::format("一共有{}种排列情况", permutations.size())
+  // std::cout << fmt::format("一共有{}种排列情况", permutations.size())
   //           << std::endl;
 
   int count = 100000;
@@ -103,7 +103,7 @@ void case3() {
 
   for (auto node = 0; node < K + L + G; node++) {
     for (auto block = 0; block < K + L + G; block++) {
-      std::cout << std::format("节点{}上存储了{}个{}号块", node,
+      std::cout << fmt::format("节点{}上存储了{}个{}号块", node,
                                nodes[node][block], block)
                 << std::endl;
     }
@@ -155,7 +155,7 @@ void case4() {
   }
 
   for (std::size_t i = 0; i < edges.size(); i++) {
-    std::cout << std::format("0号节点损坏时需要访问{}号节点{}次", i, edges[i])
+    std::cout << fmt::format("0号节点损坏时需要访问{}号节点{}次", i, edges[i])
               << std::endl;
   }
 

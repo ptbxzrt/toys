@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cmath>
-#include <format>
+#include <fmt/core.h>
 #include <iostream>
 #include <numeric>
 #include <utility>
@@ -9,7 +9,7 @@
 
 template <typename T> void print_nums(T &nums) {
   for (auto iter = nums.begin(); iter != nums.end(); iter++) {
-    std::cout << std::format("{:4} ", *iter);
+    std::cout << fmt::format("{:4} ", *iter);
   }
   std::cout << std::endl;
 }
@@ -47,7 +47,7 @@ inline double get_combination(double N, double K) {
 
 inline void print1DVector(const std::vector<int> &vec) {
   for (const auto &elem : vec) {
-    std::cout << std::format("{:4}", elem) << " ";
+    std::cout << fmt::format("{:4}", elem) << " ";
   }
   std::cout << '\n';
 }
@@ -55,7 +55,7 @@ inline void print1DVector(const std::vector<int> &vec) {
 inline void print2DVector(const std::vector<std::vector<int>> &vec) {
   for (const auto &row : vec) {
     for (const auto &elem : row) {
-      std::cout << std::format("{:4}", elem) << " ";
+      std::cout << fmt::format("{:4}", elem) << " ";
     }
     std::cout << '\n';
   }

@@ -8,8 +8,11 @@ project(toys)
 set(CMAKE_CXX_STANDARD 20)
 
 include_directories(
-  ${CMAKE_CURRENT_SOURCE_DIR}/3rd/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/3rd/yalantinglibs/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/3rd/fmt/include
 )
+
+link_directories(3rd/fmt/lib)
 
 add_subdirectory(tests)
 add_subdirectory(variant)

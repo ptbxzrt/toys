@@ -2,7 +2,7 @@
 #include <cassert>
 #include <cstddef>
 #include <exception>
-#include <format>
+#include <fmt/core.h>
 #include <future>
 #include <iostream>
 #include <limits>
@@ -167,7 +167,7 @@ public:
     std::vector<int> num_clusters = {10, 20, 40, 50, 100, 125, 250};
     std::reverse(num_clusters.begin(), num_clusters.end());
     for (const auto &num_c : num_clusters) {
-      std::cout << std::format("\nzhaoritian\n");
+      std::cout << fmt::format("\nzhaoritian\n");
       double test_times = 100;
       int blocks_per_node = 15000;
 
@@ -215,17 +215,17 @@ public:
               }
               if (failed_node_ids_in_stripe.size() >
                   icpp23_random.conf_.G + 1) {
-                std::cout << std::format("\n[\n");
-                std::cout << std::format(
+                std::cout << fmt::format("\n[\n");
+                std::cout << fmt::format(
                     "num_stripes：{}，num_nodes：{}，num_clusters：{}\n",
                     num_stripes, icpp23_random.conf_.num_nodes,
                     icpp23_random.conf_.num_clusters);
-                std::cout << std::format("丢数据stripe {} 包含的节点：",
+                std::cout << fmt::format("丢数据stripe {} 包含的节点：",
                                          stripe_id);
                 print1DVector(icpp23_random.stripes_info_[stripe_id].node_ids);
-                std::cout << std::format("条带中失败的节点: ");
+                std::cout << fmt::format("条带中失败的节点: ");
                 print1DVector(failed_node_ids_in_stripe);
-                std::cout << std::format("整个集群失败的节点: ");
+                std::cout << fmt::format("整个集群失败的节点: ");
                 print1DVector(icpp23_random.failed_node_ids_);
                 std::cout << "]\n";
                 failed_times++;
@@ -243,7 +243,7 @@ public:
         total_failed_times += static_cast<double>(f.get());
       }
 
-      std::cout << std::format(
+      std::cout << fmt::format(
           "num_clusters：{}， 一共测试{}次，数据丢失{}次，比例为{}\n", num_c,
           test_times, total_failed_times, total_failed_times / test_times);
     }
@@ -333,7 +333,7 @@ private:
     //   }
     // }
 
-    // std::cout << std::format("{} stripe inserted\n", stripe_id);
+    // std::cout << fmt::format("{} stripe inserted\n", stripe_id);
   }
 
   void read_one_stripe_data(int stripe_id) {
@@ -384,12 +384,12 @@ private:
 
   void show_clusters_and_nodes() {
     for (const auto &cluster : clusters_info_) {
-      std::cout << std::format("{}号集群，交换机带宽为{}，集群容量为{}。\n",
+      std::cout << fmt::format("{}号集群，交换机带宽为{}，集群容量为{}。\n",
                                cluster.cluster_id, cluster.cluster_bandwidth,
                                cluster.storage);
       for (const auto &node_id : cluster.node_ids) {
         const node_info &node = nodes_info_[node_id];
-        std::cout << std::format(
+        std::cout << fmt::format(
             "{:4}号节点，节点容量为{:4}。一共存储了{:8}个块，节点存储了{:8}"
             "个数据块，{:8}"
             "个全局校验块，{:8}"
@@ -432,7 +432,7 @@ private:
       cluster_network_load_balance =
           (max_network_cost - avg_network_cost) / avg_network_cost;
     }
-    std::cout << std::format(
+    std::cout << fmt::format(
         "集群间网络负载均衡情况{}，节点间存储负载均衡情况{}\n",
         cluster_network_load_balance, node_storage_load_balance);
   }
@@ -443,7 +443,7 @@ private:
          node_id++) {
       const auto &load_in_each_cluster =
           repair_load_distributions_node_cha_cluster[node_id];
-      std::cout << std::format("{:4}号节点宕机，一共产生{:6}跨集群IO：\n",
+      std::cout << fmt::format("{:4}号节点宕机，一共产生{:6}跨集群IO：\n",
                                node_id,
                                std::accumulate(load_in_each_cluster.begin(),
                                                load_in_each_cluster.end(), 0));
@@ -451,7 +451,7 @@ private:
            cluster_id++) {
         if (cluster_id != nodes_info_[node_id].cluster_id &&
             load_in_each_cluster[cluster_id] != 0) {
-          std::cout << std::format(
+          std::cout << fmt::format(
               "----在{:4}号集群产生{:6}跨集群IO\n", cluster_id,
               static_cast<double>(load_in_each_cluster[cluster_id]) /
                   clusters_info_[cluster_id].cluster_bandwidth);
@@ -1326,7 +1326,7 @@ private:
 int main() {
   assert_enum();
 
-  std::cout << std::format("cpu有{}个核\n",
+  std::cout << fmt::format("cpu有{}个核\n",
                            std::thread::hardware_concurrency());
 
   // data_placement::test_case_load_balance();

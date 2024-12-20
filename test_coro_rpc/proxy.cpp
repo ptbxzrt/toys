@@ -10,7 +10,7 @@ proxy::proxy() {
 void proxy::start() { rpc_server_->start(); }
 
 void proxy::func2() {
-  std::cout << std::format("func2: hello proxy\n");
+  std::cout << fmt::format("func2: hello proxy\n");
 
   coordinator_ = std::make_unique<coro_rpc::coro_rpc_client>();
   async_simple::coro::syncAwait(coordinator_->connect("0.0.0.0", "11111"));

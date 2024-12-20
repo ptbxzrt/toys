@@ -28,13 +28,13 @@ coordinator::coordinator() {
 void coordinator::start() { worker_.join(); }
 
 void coordinator::func1() {
-  std::cout << std::format("func1: hello coordinator\n");
+  std::cout << fmt::format("func1: hello coordinator\n");
 
   async_simple::coro::syncAwait(proxy_->call<&proxy::func2>());
 }
 
 void coordinator::func3() {
-  std::cout << std::format("func3: hello coordinator\n");
+  std::cout << fmt::format("func3: hello coordinator\n");
 }
 
 int main() {

@@ -4,7 +4,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdlib>
-#include <format>
+#include <fmt/core.h>
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -21,7 +21,7 @@ public:
       }
       cv.notify_one();
       std::this_thread::sleep_for(std::chrono::seconds(1));
-      std::cout << std::format("生产者{}生产了{}\n", id, data);
+      std::cout << fmt::format("生产者{}生产了{}\n", id, data);
     }
   }
 
@@ -38,7 +38,7 @@ public:
         sources.pop();
       }
       std::this_thread::sleep_for(std::chrono::seconds(1));
-      std::cout << std::format("消费者{}消费了{}\n", id, data);
+      std::cout << fmt::format("消费者{}消费了{}\n", id, data);
     }
   }
 

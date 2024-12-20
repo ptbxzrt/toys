@@ -2,7 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
-#include <format>
+#include <fmt/core.h>
 #include <ios>
 #include <map>
 #include <numeric>
@@ -40,7 +40,7 @@ struct ec_set_solution_config {
   int block_size;
 
   void print_config() const {
-    std::cout << std::format(
+    std::cout << fmt::format(
         "EC Set Solution 配置信息: K: {}, L: {}, G: {}, "
         "expected_scatter_width: "
         "{}, num_nodes: {}, num_stripes: {}, block_size: {} MB\n",
@@ -115,7 +115,7 @@ public:
       avg_helpers_per_TB += static_cast<double>(helpers_per_TB);
 
       // std::cout
-      //     << std::format(
+      //     << fmt::format(
       //            "{:4}号节点宕机时，有{:4}个节点可以参与修复，会产生{:6}"
       //            "个修复IO（单位为块数量），平均每1TB修复IO有{:4}个节点参与",
       //            node_id, num_helpers, repair_IO, helpers_per_TB)
@@ -129,7 +129,7 @@ public:
     double loss_probability = get_data_loss_probability_when_g_plus_2_fail();
 
     std::cout
-        << std::format(
+        << fmt::format(
                "某个节点宕机时，平均有{:.4f}个节点可以参与修复，平均会产生{:."
                "4f}"
                "个修复IO（单位为块数量），平均每1TB修复IO有{:.4f}"
@@ -157,7 +157,7 @@ public:
     }
     avg /= config_.num_nodes;
     avg_distribution /= config_.num_nodes;
-    std::cout << std::format("某个节点宕机时，在各个节点上产生的修复IO的平均值"
+    std::cout << fmt::format("某个节点宕机时，在各个节点上产生的修复IO的平均值"
                              "为{}，variance为{}。",
                              avg, avg_distribution)
               << std::endl;
@@ -187,7 +187,7 @@ private:
       profit_by_each_ec_set = profit_by_each_ec_set * 1024 * 1024 /
                               static_cast<double>(config_.block_size);
 
-      std::cout << std::format("profit_by_each_ec_set：{}\n",
+      std::cout << fmt::format("profit_by_each_ec_set：{}\n",
                                profit_by_each_ec_set);
 
       double expected_scatter_width = config_.expected_scatter_width;

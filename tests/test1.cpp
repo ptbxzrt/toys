@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <format>
+#include <fmt/core.h>
 #include <iostream>
 #include <random>
 #include <unordered_map>
@@ -45,7 +45,7 @@ int main() {
   }
 
   for (auto &neighbor : node_neighbors) {
-    std::cout << std::format("节点{}的邻居有{}个", neighbor.first,
+    std::cout << fmt::format("节点{}的邻居有{}个", neighbor.first,
                              neighbor.second.size())
               << std::endl;
   }
